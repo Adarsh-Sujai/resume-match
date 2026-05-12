@@ -2,7 +2,7 @@
 
 A web app that scores how well a resume matches a job description, highlights missing keywords, runs ATS readability checks, and uses a hosted LLM to suggest tailored bullet rewrites.
 
-Built by [Adarsh Sujai](https://adarsh-sujai.github.io).
+Built by [Adarsh K Sujai](https://adarsh-sujai.github.io).
 
 ## Features
 
