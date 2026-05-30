@@ -50,22 +50,10 @@ Built by [Adarsh K Sujai](https://adarsh-sujai.github.io).
    ```
    Open http://localhost:5000.
 
-## Deploying to Render (free)
-
-1. Push this repo to GitHub.
-2. Go to https://render.com, sign in with GitHub, click **New → Web Service**.
-3. Connect your repo. Render auto-detects `render.yaml`.
-4. In the **Environment** tab, add a secret variable:
-   - Key: `GROQ_API_KEY`
-   - Value: your real Groq key
-5. Click **Create Web Service**. First deploy takes ~3 minutes.
-
-Your app is live at `https://resumematch-xxxx.onrender.com`.
-
 ## How the API key stays secure
 
 - The key is loaded server-side from an environment variable via `python-dotenv`.
-- The browser only ever talks to your Flask server (`/api/analyze`, `/api/rewrite`). Your server calls Groq. The key never appears in any HTML, JS, or response payload.
+- The browser only ever talks to your Flask server (`/api/analyze`, `/api/rewrite`). Server calls Groq. The key never appears in any HTML, JS, or response payload.
 - `.env` is git-ignored. On Render, the key is stored as an encrypted environment variable.
 - `Flask-Limiter` enforces per-IP rate limits to prevent abuse of the free Groq quota.
 
