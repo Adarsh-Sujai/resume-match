@@ -10,12 +10,14 @@ variable. The browser never sees it.
 import os
 import re
 import io
+import secrets
 import logging
 from collections import Counter
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, g
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -30,6 +32,12 @@ load_dotenv()
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024  # 2 MB upload cap
 
+# Render terminates TLS at its load balancer and forwards the request over a
+# single proxy hop. Without this, request.remote_addr is the proxy's IP, so the
+# rate limiter would key EVERY visitor to the same bucket. ProxyFix makes Flask
+# trust one hop of X-Forwarded-For / -Proto so we see the real client IP.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
 # Rate limit so a single visitor cannot drain the free Groq quota.
 limiter = Limiter(
     get_remote_address,
@@ -37,6 +45,55 @@ limiter = Limiter(
     default_limits=["60 per hour"],
     storage_uri="memory://",
 )
+
+
+@app.before_request
+def make_csp_nonce():
+    """Per-request nonce that whitelists our one inline <script> in the CSP."""
+    g.csp_nonce = secrets.token_urlsafe(16)
+
+
+@app.context_processor
+def inject_csp_nonce():
+    """Expose the nonce to templates as {{ csp_nonce }}."""
+    return {"csp_nonce": getattr(g, "csp_nonce", "")}
+
+
+def build_csp():
+    # The frontend keeps all CSS and JS inline in index.html. The inline script
+    # is allowed via a per-request nonce (real XSS protection). Inline styles
+    # need 'unsafe-inline' because CSP nonces don't cover style="" attributes;
+    # CSS injection is low risk. No external origins are used.
+    nonce = getattr(g, "csp_nonce", "")
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "frame-ancestors 'none'; "
+        "form-action 'self'"
+    )
+
+
+@app.after_request
+def set_security_headers(response):
+    """Apply hardening headers to every response."""
+    response.headers["Content-Security-Policy"] = build_csp()
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = (
+        "geolocation=(), microphone=(), camera=(), payment=()"
+    )
+    # Only advertise HSTS over real HTTPS so local http dev isn't pinned.
+    if request.is_secure:
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
+    return response
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
